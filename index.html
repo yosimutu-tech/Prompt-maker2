@@ -227,7 +227,7 @@
 
       <button class="btn btn-primary" id="genBtn" onclick="generatePrompt()">
         ✨ プロンプトを生成する
-< truncated line 230 >
+      </button>
     </div>
 
     <!-- OUTPUT -->
@@ -359,7 +359,7 @@ async function callAPI(system, userMsg) {
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-5;
+      model: 'claude-sonnet-4-20250514',
       max_tokens: 1000,
       system,
       messages: [{ role: 'user', content: userMsg }]
