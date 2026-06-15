@@ -132,6 +132,41 @@
   .saved-item-actions { display: flex; gap: 6px; margin-top: 10px; }
   .empty-state { text-align: center; color: var(--muted); padding: 40px 0; font-size: .9rem; }
 
+  /* ── STATUS ── */
+  .status-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px; margin-bottom: 16px;
+  }
+  .status-card {
+    background: var(--surface); border: 1.5px solid var(--border);
+    border-radius: 12px; padding: 16px;
+  }
+  .status-card-label {
+    font-size: .72rem; font-family: 'Space Mono', monospace;
+    color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px;
+  }
+  .status-card-value {
+    font-size: 1.6rem; font-family: 'Space Mono', monospace; font-weight: 700;
+    color: var(--text); line-height: 1;
+  }
+  .status-card-value.ok { color: var(--success); }
+  .status-card-value.warn { color: var(--accent2); }
+  .status-card-sub {
+    font-size: .75rem; color: var(--muted); margin-top: 4px;
+  }
+  .status-log {
+    background: var(--surface); border: 1.5px solid var(--border);
+    border-radius: 12px; padding: 16px; font-family: 'Space Mono', monospace;
+    font-size: .8rem; color: var(--muted); line-height: 1.8;
+  }
+  .status-log-entry { display: flex; gap: 12px; }
+  .status-log-time { color: var(--accent); min-width: 90px; }
+  .status-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--success); margin-right: 6px; vertical-align: middle;
+  }
+  .status-dot.off { background: var(--accent2); }
+
   /* ── SPINNER ── */
   .spinner {
     width: 18px; height: 18px; border: 2px solid rgba(255,255,255,.3);
@@ -178,6 +213,7 @@
   <div class="tabs">
     <button class="tab-btn active" onclick="switchTab('create')">✏️ 作成</button>
     <button class="tab-btn" onclick="switchTab('saved')">📂 保存済み</button>
+    <button class="tab-btn" onclick="switchTab('status')">📊 ステータス</button>
   </div>
 
   <!-- CREATE TAB -->
@@ -257,6 +293,18 @@
   <div id="tab-saved" class="section-hidden">
     <div id="savedList"></div>
   </div>
+
+  <!-- STATUS TAB -->
+  <div id="tab-status" class="section-hidden">
+    <div class="card">
+      <div class="card-label">📊 アプリ ステータス</div>
+      <div class="status-grid" id="statusGrid"></div>
+    </div>
+    <div class="card">
+      <div class="card-label">🕓 セッション ログ</div>
+      <div class="status-log" id="statusLog"></div>
+    </div>
+  </div>
 </div>
 
 <div id="toast">コピーしました！</div>
@@ -266,15 +314,21 @@
 let savedPrompts = JSON.parse(localStorage.getItem('pf_prompts') || '[]');
 let currentOutput = '';
 let currentImprove = '';
+let sessionGenCount = 0;
+let sessionStartTime = new Date();
+let sessionLog = [];
 
 // ── TABS ──
 function switchTab(tab) {
-  document.querySelectorAll('.tab-btn').forEach((b,i) => {
-    b.classList.toggle('active', (i===0 && tab==='create') || (i===1 && tab==='saved'));
+  const tabs = ['create', 'saved', 'status'];
+  document.querySelectorAll('.tab-btn').forEach((b, i) => {
+    b.classList.toggle('active', tabs[i] === tab);
   });
-  document.getElementById('tab-create').classList.toggle('section-hidden', tab !== 'create');
-  document.getElementById('tab-saved').classList.toggle('section-hidden', tab !== 'saved');
+  tabs.forEach(t => {
+    document.getElementById('tab-' + t).classList.toggle('section-hidden', t !== tab);
+  });
   if (tab === 'saved') renderSaved();
+  if (tab === 'status') renderStatus();
 }
 
 // ── API KEY ──
@@ -319,8 +373,11 @@ async function generatePrompt() {
     const res = await callAPI(systemPrompt, userInput);
     currentOutput = res;
     document.getElementById('outputBox').textContent = res;
+    sessionGenCount++;
+    sessionLog.unshift({ time: new Date(), msg: 'プロンプト生成: ' + (purpose || '目的未設定') });
   } catch(e) {
     document.getElementById('outputBox').textContent = 'エラー: ' + e.message;
+    sessionLog.unshift({ time: new Date(), msg: 'エラー: ' + e.message });
   }
   setLoading(false);
 }
@@ -342,8 +399,10 @@ async function improvePrompt() {
     const res = await callAPI(sys, currentOutput);
     currentImprove = res;
     document.getElementById('improveBox').textContent = res;
+    sessionLog.unshift({ time: new Date(), msg: 'AIによる改善完了' });
   } catch(e) {
     document.getElementById('improveBox').textContent = 'エラー: ' + e.message;
+    sessionLog.unshift({ time: new Date(), msg: '改善エラー: ' + e.message });
   }
   setLoading(false);
 }
@@ -433,6 +492,76 @@ function deletePrompt(id) {
   savedPrompts = savedPrompts.filter(p => p.id !== id);
   localStorage.setItem('pf_prompts', JSON.stringify(savedPrompts));
   renderSaved();
+}
+
+// ── STATUS ──
+function renderStatus() {
+  const hasKey = !!getKey();
+  const uptime = Math.floor((new Date() - sessionStartTime) / 60000);
+  const lastGen = sessionLog.find(e => e.msg.startsWith('プロンプト生成'));
+  const lastGenTime = lastGen ? lastGen.time.toLocaleTimeString('ja-JP') : '—';
+
+  const cards = [
+    {
+      label: 'APIキー',
+      value: hasKey ? 'SET' : 'UNSET',
+      valueClass: hasKey ? 'ok' : 'warn',
+      sub: hasKey ? '設定済み・接続可能' : '未入力',
+      dot: hasKey
+    },
+    {
+      label: '保存済みプロンプト',
+      value: savedPrompts.length,
+      valueClass: '',
+      sub: 'localStorageに保存中'
+    },
+    {
+      label: 'セッション生成数',
+      value: sessionGenCount,
+      valueClass: '',
+      sub: '今回のセッション中'
+    },
+    {
+      label: 'セッション時間',
+      value: uptime + 'm',
+      valueClass: '',
+      sub: '起動から ' + uptime + ' 分経過'
+    },
+    {
+      label: '最終生成',
+      value: lastGenTime,
+      valueClass: '',
+      sub: lastGen ? lastGen.time.toLocaleDateString('ja-JP') : '—'
+    },
+    {
+      label: 'モデル',
+      value: 'Sonnet',
+      valueClass: '',
+      sub: 'claude-sonnet-4-5'
+    }
+  ];
+
+  document.getElementById('statusGrid').innerHTML = cards.map(c => `
+    <div class="status-card">
+      <div class="status-card-label">${c.label}</div>
+      <div class="status-card-value ${c.valueClass}">
+        ${'dot' in c ? `<span class="status-dot${c.dot ? '' : ' off'}"></span>` : ''}${escHtml(String(c.value))}
+      </div>
+      <div class="status-card-sub">${escHtml(c.sub)}</div>
+    </div>
+  `).join('');
+
+  const logEl = document.getElementById('statusLog');
+  if (!sessionLog.length) {
+    logEl.innerHTML = '<span style="color:var(--muted)">まだアクティビティはありません</span>';
+    return;
+  }
+  logEl.innerHTML = sessionLog.slice(0, 20).map(e => `
+    <div class="status-log-entry">
+      <span class="status-log-time">${e.time.toLocaleTimeString('ja-JP')}</span>
+      <span>${escHtml(e.msg)}</span>
+    </div>
+  `).join('');
 }
 
 // ── UTILS ──
